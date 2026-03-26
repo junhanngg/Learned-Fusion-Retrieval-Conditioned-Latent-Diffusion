@@ -22,16 +22,16 @@ The proposed system would consist of:
 - ⁠a VAE to encode spectrograms into a compact latent space,
 - a conditional latent diffusion model operating in that latent space,
 - ⁠and an improved conditioning mechanism that explicitly incorporates:
--     left/right context information,
--     mask-aware conditioning,
--     and gap-length conditioning.
+-   left/right context information,
+-   sk-aware conditioning,
+-   d gap-length conditioning.
 
 To evaluate the effectiveness of the proposed approach, we plan to compare:
 
-1. ⁠A simple CNN autoencoder baseline,
-2.⁠ ⁠A U-Net baseline,
-3.⁠ ⁠A plain conditional latent diffusion baseline,
-4.⁠ ⁠and the context-enhanced latent diffusion model.
+1. A simple CNN autoencoder baseline,
+2. ⁠A U-Net baseline,
+3. ⁠A plain conditional latent diffusion baseline,
+4. ⁠and the context-enhanced latent diffusion model.
 
 
 **4. What dataset will you use? Provide information about the dataset, and a URL for the dataset if available. Briefly discuss suitability of the dataset for your problem.**
