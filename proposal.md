@@ -16,18 +16,19 @@ We expect to evaluate the models under multiple missing-gap durations (for e.g.,
 
 
 **3. What deep learning methodologies do you plan to use in your project?**
+
 The proposed system would consist of:
 
-•⁠  ⁠a VAE to encode spectrograms into a compact latent space,
-•⁠  ⁠a conditional latent diffusion model operating in that latent space,
-•⁠  ⁠and an improved conditioning mechanism that explicitly incorporates:
-    - left/right context information,
-    - mask-aware conditioning,
-    - and gap-length conditioning.
+- ⁠a VAE to encode spectrograms into a compact latent space,
+- a conditional latent diffusion model operating in that latent space,
+- ⁠and an improved conditioning mechanism that explicitly incorporates:
+-     left/right context information,
+-     mask-aware conditioning,
+-     and gap-length conditioning.
 
 To evaluate the effectiveness of the proposed approach, we plan to compare:
 
-1.⁠ ⁠A simple CNN autoencoder baseline,
+1. ⁠A simple CNN autoencoder baseline,
 2.⁠ ⁠A U-Net baseline,
 3.⁠ ⁠A plain conditional latent diffusion baseline,
 4.⁠ ⁠and the context-enhanced latent diffusion model.
