@@ -22,9 +22,7 @@ The proposed system would consist of:
 - ⁠a VAE to encode spectrograms into a compact latent space,
 - a conditional latent diffusion model operating in that latent space,
 - ⁠and an improved conditioning mechanism that explicitly incorporates:
--   left/right context information,
--   sk-aware conditioning,
--   d gap-length conditioning.
+      left/right context information, sk-aware conditioning, d gap-length conditioning.
 
 To evaluate the effectiveness of the proposed approach, we plan to compare:
 
