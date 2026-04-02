@@ -1,0 +1,52 @@
+project:
+  name: "maestro dataphase" # project label
+  seed: 42 # random seed for reproducibility
+
+# data directory
+paths:
+  raw_data_dir: "./raw/maestro-v3.0.0" # root folder with raw MAESTRO dataset
+  metadata_csv: "./raw/maestro-v3.0.0.csv" # metadata location
+  processed_dir: "./processed" # processed clips output directory
+  clips_dir: "./processed/clips" # processed clips
+  specs_dir: "./processed/spectrograms" # mel spectrogram tensors
+  manifests_dir: "./processed/manifests" # manifests: table with records of clipids, split, waveform path, etc
+
+# audio configs
+audio:
+  sample_rate: 16000 # (16000, 22050, 24000, 44100) audio samples per second after resampling
+  mono: false # true = mono/ false = stereo
+  normalise: true # amplitude normalisation
+  clip_duration_seconds: 30.0 # (10.0, 15.0, 30.0, 60,0) length of the chopped clip
+
+# mel spectorgram configs
+spectrogram:
+  n_fft: 1024 # (512, 1024, 2048) controls frequency resolution: high n_fft = better resolution
+  hop_length: 256 # (128, 256, 512) window steps 
+  win_length: 1024 # (512, 1024, 2048) window size
+  n_mels: 128 # (64, 80, 128) number of mel frequency bins in the spectrogram
+  f_min: 30 # (0, 20, 30, 50) minimum frequency in the mel filterbank
+  f_max: 8000 # (7600, 8000, null) maximum frequency in the mel filterbank
+  power: 2.0 # (1.0, 2.0) controls if spectrogram represents magnitude (1.0) or power (2.0)
+
+# masking configs
+masking:
+  strategy: "random_safe" # (center, random, random_safe, mixed) position of missing region
+  gap_seconds_options: [0.5, 1.0, 2.0, 5.0] # set missing durations
+  safe_margin_ratio: 0.2 # (0.1, 0.2, 0.25) ratio margin to stay away from edges
+  fill_value: 0.0 # placeholder in missing region
+
+# split configs
+split:
+  use_official_maestro_split: true # rely on oriignal split labels provided by MAESTRO metdata
+  train_name: "train" # labels to look for 
+  val_name: "validation" # labels to look for 
+  test_name: "test" # labels to look for 
+
+# save configs
+save:
+  save_waveform_clips: true # true = save clips, false = do not save clips
+  save_mel_spectrograms: true # true = save spectrogram, false = do not save spectrogram
+  save_manifests: true # # true = save manifests, false = do not save manifests
+  audio_format: "pt" # (wav, npy, pt) file format for waveform clips
+  spectrogram_format: "pt" # (npy, pt) file format for spectrogram
+
