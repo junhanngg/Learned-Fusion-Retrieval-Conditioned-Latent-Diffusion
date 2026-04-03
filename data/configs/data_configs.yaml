@@ -16,14 +16,14 @@ paths:
   processed_dir: "./processed" # processed clips output directory
   clips_dir: "./processed/clips" # processed clips
   specs_dir: "./processed/spectrograms" # mel spectrogram tensors
-  masked_specs_dir: "./data/processed/masked_spectrograms"
-  masks_dir: "./data/processed/masks"
+  masked_specs_dir: "./processed/masked_spectrograms"
+  masks_dir: "./processed/masks"
   manifests_dir: "./processed/manifests" # manifests: table with records of clipids, split, waveform path, etc
 
 # audio configs
 audio:
   sample_rate: 16000 # (16000, 22050, 24000, 44100) audio samples per second after resampling
-  mono: false # true = mono/ false = stereo
+  mono: true # true = mono/ false = stereo
   normalise: true # amplitude normalisation
   clip_duration_seconds: 30.0 # (10.0, 15.0, 30.0, 60,0) length of the chopped clip
 
