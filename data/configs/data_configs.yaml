@@ -59,4 +59,9 @@ save:
   audio_format: "pt" # (wav, npy, pt) file format for waveform clips
   spectrogram_format: "pt" # (npy, pt) file format for spectrogram
 
-
+# subset
+subset:
+  enabled: true
+  target_train_clips: 100 # max number of clips in train
+  target_val_clips: 10 # max number of clips in val
+  target_test_clips: 10 # max number of clips in test
