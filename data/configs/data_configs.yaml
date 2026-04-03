@@ -13,7 +13,6 @@ huggingface:
 paths:
   raw_data_dir: "./raw/maestro-v3.0.0" # root folder with raw MAESTRO dataset
   metadata_csv: "./raw/maestro-v3.0.0.csv" # metadata location
-
   processed_dir: "./processed" # processed clips output directory
   clips_dir: "./processed/clips" # processed clips
   specs_dir: "./processed/spectrograms" # mel spectrogram tensors
