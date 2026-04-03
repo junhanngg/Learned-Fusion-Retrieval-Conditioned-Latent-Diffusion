@@ -1,14 +1,24 @@
-project:
-  name: "maestro dataphase" # project label
-  seed: 42 # random seed for reproducibility
+# huggingface configs
+huggingface:
+  enable_upload: true
+  raw_repo_id: "YOUR_USERNAME/maestro-raw"
+  processed_repo_id: "YOUR_USERNAME/maestro-processed"
+  private_raw: true
+  private_processed: false
+  use_large_upload: true
+  raw_staging_dir: "./hf_staging/raw"
+  processed_staging_dir: "./hf_staging/processed"
 
 # data directory
 paths:
   raw_data_dir: "./raw/maestro-v3.0.0" # root folder with raw MAESTRO dataset
   metadata_csv: "./raw/maestro-v3.0.0.csv" # metadata location
+
   processed_dir: "./processed" # processed clips output directory
   clips_dir: "./processed/clips" # processed clips
   specs_dir: "./processed/spectrograms" # mel spectrogram tensors
+  masked_specs_dir: "./data/processed/masked_spectrograms"
+  masks_dir: "./data/processed/masks"
   manifests_dir: "./processed/manifests" # manifests: table with records of clipids, split, waveform path, etc
 
 # audio configs
@@ -49,4 +59,5 @@ save:
   save_manifests: true # # true = save manifests, false = do not save manifests
   audio_format: "pt" # (wav, npy, pt) file format for waveform clips
   spectrogram_format: "pt" # (npy, pt) file format for spectrogram
+
 
