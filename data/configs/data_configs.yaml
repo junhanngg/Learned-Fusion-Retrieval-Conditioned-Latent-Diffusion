@@ -1,24 +1,19 @@
 # huggingface configs
 huggingface:
-  enable_upload: true
-  raw_repo_id: "YOUR_USERNAME/maestro-raw"
-  processed_repo_id: "YOUR_USERNAME/maestro-processed"
-  private_raw: true
-  private_processed: false
-  use_large_upload: true
-  raw_staging_dir: "./hf_staging/raw"
-  processed_staging_dir: "./hf_staging/processed"
+  raw_repo_id: "han2o/maestro-raw"
+  processed_repo_id: "han2o/grant-ortsaem-processed"
 
 # data directory
 paths:
+  raw_dir: "./raw" # raw directory
   raw_data_dir: "./raw/maestro-v3.0.0" # root folder with raw MAESTRO dataset
   metadata_csv: "./raw/maestro-v3.0.0.csv" # metadata location
   processed_dir: "./processed" # processed clips output directory
-  clips_dir: "./processed/clips" # processed clips
-  specs_dir: "./processed/spectrograms" # mel spectrogram tensors
-  masked_specs_dir: "./processed/masked_spectrograms"
-  masks_dir: "./processed/masks"
-  manifests_dir: "./processed/manifests" # manifests: table with records of clipids, split, waveform path, etc
+  # clips_dir: "./processed/clips" # processed clips
+  # specs_dir: "./processed/spectrograms" # mel spectrogram tensors
+  # masked_specs_dir: "./processed/masked_spectrograms"
+  # masks_dir: "./processed/masks"
+  # manifests_dir: "./processed/manifests" # manifests: table with records of clipids, split, waveform path, etc
 
 # audio configs
 audio:
@@ -40,7 +35,7 @@ spectrogram:
 # masking configs
 masking:
   strategy: "random_safe" # (center, random, random_safe, mixed) position of missing region
-  gap_seconds_options: [0.5, 1.0, 2.0, 5.0] # set missing durations
+  gap_seconds_options: [0.5, 2.0, 3.0, 5.0] # set missing durations
   safe_margin_ratio: 0.2 # (0.1, 0.2, 0.25) ratio margin to stay away from edges
   fill_value: 0.0 # placeholder in missing region
 
@@ -62,6 +57,6 @@ save:
 # subset
 subset:
   enabled: true
-  target_train_clips: 100 # max number of clips in train
-  target_val_clips: 10 # max number of clips in val
-  target_test_clips: 10 # max number of clips in test
+  target_train_clips: 20000 # max number of clips in train
+  target_val_clips: 2000 # max number of clips in val
+  target_test_clips: 2000 # max number of clips in test
