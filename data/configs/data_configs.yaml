@@ -1,19 +1,28 @@
 # huggingface configs
 huggingface:
-  raw_repo_id: "han2o/maestro-raw"
+  # non-parquet
   processed_repo_id: "han2o/grant-ortsaem-processed"
+  # parquet
+  processed_parquet_id: "han2o/grant-ortsaem-processedV2"
 
 # data directory
 paths:
+  # raw directory
   raw_dir: "./raw" # raw directory
   raw_data_dir: "./raw/maestro-v3.0.0" # root folder with raw MAESTRO dataset
   metadata_csv: "./raw/maestro-v3.0.0.csv" # metadata location
+  
+  # non-parquet processing
   processed_dir: "./processed" # processed clips output directory
-  # clips_dir: "./processed/clips" # processed clips
-  # specs_dir: "./processed/spectrograms" # mel spectrogram tensors
-  # masked_specs_dir: "./processed/masked_spectrograms"
-  # masks_dir: "./processed/masks"
-  # manifests_dir: "./processed/manifests" # manifests: table with records of clipids, split, waveform path, etc
+  clips_dir: "./processed/clips" # processed clips
+  specs_dir: "./processed/spectrograms" # mel spectrogram tensors
+  masked_specs_dir: "./processed/masked_spectrograms"
+  masks_dir: "./processed/masks"
+  manifests_dir: "./processed/manifests" # manifests: table with records of clipids, split, waveform path, etc
+
+  # parquet processing 
+  output_model_dir: "./processed/model" # directory for parquet files ready for model training
+  output_debug_dir: "./processed/debug" # directory for debug files (e.g. masked spectrograms with missing regions filled with audio)
 
 # audio configs
 audio:
@@ -31,6 +40,7 @@ spectrogram:
   f_min: 30 # (0, 20, 30, 50) minimum frequency in the mel filterbank
   f_max: 8000 # (7600, 8000, null) maximum frequency in the mel filterbank
   power: 2.0 # (1.0, 2.0) controls if spectrogram represents magnitude (1.0) or power (2.0)
+  transform: "log1p"
 
 # masking configs
 masking:
@@ -41,18 +51,28 @@ masking:
 
 # split configs
 split:
-  use_official_maestro_split: true # rely on oriignal split labels provided by MAESTRO metdata
+  use_official_maestro_split: true # rely on orignal split labels provided by MAESTRO metdata
   train_name: "train" # labels to look for 
   val_name: "validation" # labels to look for 
   test_name: "test" # labels to look for 
 
+# parquet build configs
+parquet:
+  examples_per_shard: # maximum numebr of examples per shard
+    train: 20
+    validation: 20
+    test: 20
+  compression: "zstd"
+
 # save configs
 save:
-  save_waveform_clips: true # true = save clips, false = do not save clips
-  save_mel_spectrograms: true # true = save spectrogram, false = do not save spectrogram
-  save_manifests: true # # true = save manifests, false = do not save manifests
   audio_format: "pt" # (wav, npy, pt) file format for waveform clips
   spectrogram_format: "pt" # (npy, pt) file format for spectrogram
+
+# debug audio configs
+debug_audio:
+  target_test_clips: 10
+  audio_format: "wav"
 
 # subset
 subset:
