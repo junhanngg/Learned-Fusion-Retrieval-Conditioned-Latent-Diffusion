@@ -3,6 +3,28 @@ import torch
 from torch.utils.data import Dataset, DataLoader, IterableDataset
 from datasets import load_dataset
 
+"""
+Usage:
+--------------------------------------------------------------------------
+dm = DataModule(
+    repo_id="han2o/grant-ortsaem-processedV2", # hugging face path
+    variant="short_gaps",
+    input_key="masked_spectrogram",
+    target_key="spectrogram",
+    mask_key="mask",
+    batch_size=16,
+    streaming=True,
+
+    # max number of samples to take from dataset
+    max_train_samples=10000,         # max number of samples 10000
+    max_val_samples=1000,            # max number of sampels 1000
+    max_test_samples=1000,           # max number of sampels 1000
+    num_workers=2,
+    pin_memory=True
+)
+--------------------------------------------------------------------------
+"""
+
 # for non streaming, streaming = False
 class Load_SpecDataset(Dataset):
     """
@@ -150,10 +172,16 @@ class Load_IterSpecDataset(IterableDataset):
 
 #  main wrapper class, manages the full process
 class DataModule:
+    """
+    wrapper that loads on dataset variant from hugging face parquet repository:
+    variants:
+    - short_gaps (0.5 to 2.0)
+    - long_gaps (0.5 to 5.0)
+    """
     def __init__(
         self,
         repo_id,
-        gap,
+        variant,
         input_key="masked_spectrogram",
         target_key="spectrogram",
         mask_key="mask",
@@ -166,11 +194,12 @@ class DataModule:
         max_train_samples=None,
         max_val_samples=None,
         max_test_samples=None,
-        shuffle_train_buffer=256, # 
+        shuffle_train_buffer=256,
         pin_memory=False,
-    ):
+        ):
+
         self.repo_id = repo_id
-        self.gap = str(gap)
+        self.gap = str(variant)
 
         self.input_key = input_key
         self.target_key = target_key
@@ -196,7 +225,7 @@ class DataModule:
 
     # builds hugging face path for repo and gap
     def path_(self, pattern):
-        return f"hf://datasets/{self.repo_id}/{self.gap}/{pattern}"
+        return f"hf://datasets/{self.repo_id}/{self.variant}/{pattern}"
 
     # load huggingface dataset
     def load_hf(self):
@@ -234,7 +263,7 @@ class DataModule:
                 input_key=self.input_key,
                 target_key=self.target_key,
                 mask_key=self.mask_key,
-                max_samples=self.max_train_samples,
+                max_samples=self.max_train_samples
             )
 
             self.val_dataset = Load_IterSpecDataset(
@@ -242,7 +271,7 @@ class DataModule:
                 input_key=self.input_key,
                 target_key=self.target_key,
                 mask_key=self.mask_key,
-                max_samples=self.max_val_samples,
+                max_samples=self.max_val_samples
             )
 
             self.test_dataset = Load_IterSpecDataset(
@@ -250,37 +279,43 @@ class DataModule:
                 input_key=self.input_key,
                 target_key=self.target_key,
                 mask_key=self.mask_key,
-                max_samples=self.max_test_samples,
+                max_samples=self.max_test_samples
             )
 
         # streaming off, load everything into RAM and build standard PyTorch datasets
         else:
             if self.max_train_samples is not None:
-                train_split = train_split.select(range(min(self.max_train_samples, len(train_split))))
+                train_split = train_split.select(
+                    range(min(self.max_train_samples, len(train_split)))
+                    )
             if self.max_val_samples is not None:
-                val_split = val_split.select(range(min(self.max_val_samples, len(val_split))))
+                val_split = val_split.select(
+                    range(min(self.max_val_samples, len(val_split)))
+                    )
             if self.max_test_samples is not None:
-                test_split = test_split.select(range(min(self.max_test_samples, len(test_split))))
+                test_split = test_split.select(
+                    range(min(self.max_test_samples, len(test_split)))
+                    )
 
             self.train_dataset = Load_SpecDataset(
                 train_split,
                 input_key=self.input_key,
                 target_key=self.target_key,
-                mask_key=self.mask_key,
+                mask_key=self.mask_key
             )
 
             self.val_dataset = Load_SpecDataset(
                 val_split,
                 input_key=self.input_key,
                 target_key=self.target_key,
-                mask_key=self.mask_key,
+                mask_key=self.mask_key
             )
 
             self.test_dataset = Load_SpecDataset(
                 test_split,
                 input_key=self.input_key,
                 target_key=self.target_key,
-                mask_key=self.mask_key,
+                mask_key=self.mask_key
             )
 
         return self.train_dataset, self.val_dataset, self.test_dataset
@@ -296,19 +331,19 @@ class DataModule:
                 self.train_dataset,
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
-                pin_memory=self.pin_memory,
+                pin_memory=self.pin_memory
             )
             val_loader = DataLoader(
                 self.val_dataset,
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
-                pin_memory=self.pin_memory,
+                pin_memory=self.pin_memory
             )
             test_loader = DataLoader(
                 self.test_dataset,
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
-                pin_memory=self.pin_memory,
+                pin_memory=self.pin_memory
             )
 
         # streaming is off, standard dataloader with shuffling for train and no shuffling for val/test
@@ -318,21 +353,21 @@ class DataModule:
                 batch_size=self.batch_size,
                 shuffle=True,
                 num_workers=self.num_workers,
-                pin_memory=self.pin_memory,
+                pin_memory=self.pin_memory
             )
             val_loader = DataLoader(
                 self.val_dataset,
                 batch_size=self.batch_size,
                 shuffle=False,
                 num_workers=self.num_workers,
-                pin_memory=self.pin_memory,
+                pin_memory=self.pin_memory
             )
             test_loader = DataLoader(
                 self.test_dataset,
                 batch_size=self.batch_size,
                 shuffle=False,
                 num_workers=self.num_workers,
-                pin_memory=self.pin_memory,
+                pin_memory=self.pin_memory
             )
 
         return train_loader, val_loader, test_loader
