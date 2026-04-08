@@ -57,7 +57,7 @@ class ModelCheckpoint:
 
         # always save last checkpoint
         last_path = os.path.join(self.checkpoint_dir, "last_model.pt")
-        self._save_checkpoint(
+        self.save_checkpoint(
             path=last_path,
             epoch=epoch,
             model=model,
@@ -75,7 +75,7 @@ class ModelCheckpoint:
             if epoch >= self.save_best_after_epoch:
                 # save best model only after warmup 
                 best_path = os.path.join(self.checkpoint_dir, "best_model.pt")
-                self._save_checkpoint(
+                self.save_checkpoint(
                     path=best_path,
                     epoch=epoch,
                     model=model,
