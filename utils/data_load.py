@@ -8,7 +8,7 @@ Usage:
 --------------------------------------------------------------------------
 dm = DataModule(
     repo_id="han2o/grant-ortsaem-processedV2", # hugging face path
-    variant="short_gaps",
+    variant="short_gaps",            # short_gap (0.5 to 2.0) or long_gap(0.5 to 5.0)
     input_key="masked_spectrogram",
     target_key="spectrogram",
     mask_key="mask",
