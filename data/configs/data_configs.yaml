@@ -45,7 +45,13 @@ spectrogram:
 # masking configs
 masking:
   strategy: "random_safe" # (center, random, random_safe, mixed) position of missing region
-  gap_seconds_options: [0.5, 2.0, 3.0, 5.0] # set missing durations
+  gap_ranges:             # set missing durations
+  - name: "short_gaps"
+    min_gaps:0.5
+    max_gaps:2.0
+  - name: "long_gaps"
+    min_gaps:0.5
+    max_gaps:5.0
   safe_margin_ratio: 0.2 # (0.1, 0.2, 0.25) ratio margin to stay away from edges
   fill_value: 0.0 # placeholder in missing region
 
@@ -77,6 +83,6 @@ debug_audio:
 # subset
 subset:
   enabled: true
-  target_train_clips: 20000 # max number of clips in train
-  target_val_clips: 2000 # max number of clips in val
-  target_test_clips: 2000 # max number of clips in test
+  target_train_clips: 10000 # max number of clips in train
+  target_val_clips: 1000 # max number of clips in val
+  target_test_clips: 1000 # max number of clips in test
