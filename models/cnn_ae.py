@@ -31,7 +31,7 @@ Usage:
 - Create Model:
 
 model = CNNAutoencoder(
-    gap_seconds=0.5,            
+    variant="short_gaps,            
     lossfn="masked_l1",                     # defaulted to masked_l1 if not defined
     shortgap_loss="masked_l1",              # for 0.5 and 2.0
     longgap_loss="masked_multires_l1",      # for 3.0 and 5.0
@@ -176,18 +176,18 @@ class MBConvBlock(nn.Module):
 class CNNAutoencoder(nn.Module):
     def __init__(
         self,
-        gap_seconds=0.5,
+        variant="short_gaps",
         lossfn="masked_l1",
         shortgap_loss="masked_l1",
         longgap_loss="masked_multires_l1",
         lr=1e-3,
         weight_decay=1e-5,
         grad_clip=1.0,
-        device=None,
+        device=None
     ):
         super().__init__()
 
-        self.gap_seconds = gap_seconds
+        self.variant = variant
         self.shortgap_loss = shortgap_loss
         self.longgap_loss = longgap_loss
         self.lossfn = self.get_loss(lossfn)
@@ -298,15 +298,14 @@ class CNNAutoencoder(nn.Module):
         return out
 
     # configuration helpers
-    def get_loss(self, lossfn):
-        if self.gap_seconds in (0.5, 2.0):
+    def get_loss(self, lossfn):            
+        if self.variant == "short_gap":
             return self.shortgap_loss
-        elif self.gap_seconds in (3.0, 5.0):
+        elif self.variant == "long_gap":
             return self.longgap_loss
         else:
             raise ValueError(
-                f"Invalid gap_seconds={self.gap_seconds}. "
-                f"Choose from [0.5, 2.0, 3.0, 5.0]."
+                f"Invalid gap variant {self.variant}."
             )
 
     def config_optimiser(self):
