@@ -6,4 +6,4 @@ data/raw/*
 data/processed/*
 
 data/data2pt.ipynb
-playbook.ipynb
+*playbook*.ipynb
