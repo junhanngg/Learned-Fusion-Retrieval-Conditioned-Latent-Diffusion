@@ -199,7 +199,7 @@ class DataModule:
         ):
 
         self.repo_id = repo_id
-        self.gap = str(variant)
+        self.variant = str(variant)
 
         self.input_key = input_key
         self.target_key = target_key
