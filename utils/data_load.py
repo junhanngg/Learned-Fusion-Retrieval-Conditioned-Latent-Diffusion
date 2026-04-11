@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader, IterableDataset
+import os
+os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
 from datasets import load_dataset
 
 """
