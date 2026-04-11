@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import Adam
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 import os
 
 import math
@@ -31,45 +32,61 @@ Usage:
 - Create Model:
 
 model = CNNAutoencoder(
-    variant="short_gaps,            
-    lossfn="masked_l1",                     # defaulted to masked_l1 if not defined
+    base_channel=16,                        # 24 if there is memory
     shortgap_loss="masked_l1",              # for 0.5 and 2.0
-    longgap_loss="masked_multires_l1",      # for 3.0 and 5.0
-    lr=1e-3,                                # learning rate
-    weight_decay=1e-5,                      # lr decay steps
-    grad_clip=1.0,                         
+    longgap_loss="masked_multires_l1"       # for 3.0 and 5.0
 ).to(device)
 
 --------------------------------------------------------------------------
 - Creating optimiser:
 
-model.configure_optimiser()
+optimiser = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
 
+--------------------------------------------------------------------------
+- Get Loss Name:
+
+lossfn = model.get_loss_name(
+                        variant="short_gap,
+                        shortgap_loss="masked_l1",
+                        longgap_loss="masked_multires_l1_grad"
+                        )
 --------------------------------------------------------------------------
 - Training model:
 
 results = model.fit(
     train_loader=train_loader,
     val_loader=val_loader,
-    n_epochs=100,                           # recommended epoch training
-    checkpoint_dir=checkpoint_dir,          # hardcoded in script (see below)
-    history_csv_path=history_dir,           # hardcoded in script (see below)
-    monitor="val_gap_rmse",                 # early stopping/best model monitored on this
+    optimiser=optimiser,
+    device=device,
+    n_epochs=10,
+    checkpoint_dir=checkpoint_dir,
+    history_csv_path=history_dir,
+    loss_name=lossfn,
+    monitor="val_gap_rmse",
     mode="min",
-    patience=5,                             # patience before early stoppping
-    min_delta=1e-4,             
-    save_best_after_epoch=10                 # num of epochs before checking to save
+    patience=5,
+    min_delta=1e-4,
+    save_best_after_epoch=5,
+    grad_clip=1.0,
+    use_amp=True,
 )
 --------------------------------------------------------------------------
+- Load the Best Model:
 
+model.load_best(checkpoint_dir=checkpoint_dir, device=device)
+
+--------------------------------------------------------------------------
 - Inferencing:
-batch = next(iter(test_loader))       
+
+batch = next(iter(test_loader))
+
 x = batch["x"][0]
-y = batch["y"][0]
 mask = batch["mask"][0]
 
-pred = model.inference(x, mask)                # generates prediction for gaps
-full_pred = model.reconstruct_full(x, mask)    # construct the full spectrogram
+pred = model.predict(x, mask, device=device)
+print(pred.shape)
+
+pred, merged = model.predict_full(x, mask, device=device) # full mmerged reconstruction
 
 """
 
@@ -78,60 +95,59 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
 # define checkpoints and history 
-root_dir = Path("training_logs/CNN_AE")
+root_dir = Path("training_logs/cnn_ae")
 # root_dir.mkdir(parents=True, exist_ok=True)
-checkpoint_dir = root_dir / "model_weights"
-history_dir = root_dir / "history_csv"
+checkpoint_dir = root_dir / "checkpoints"
+history_dir = root_dir / "history"
 
-# squeeze and excitation block to learn channel-wise importance weights
+# SE block
+# learns channel-wise importance weights
 class SEBlock(nn.Module):
-    def __init__(self, channels, reduction=4):
+    def __init__(self, channels, reduction=8):
         super().__init__()
 
-        # reduce channel dimension in the small gating network
+        # hidden size inside the gating MLP
         hidden = max(channels // reduction, 8)
 
-        # global average pooling: converts each channel from (H, W) into a single summary value
-        self.pool = nn.AdaptiveAvgPool2d(1) # (B, C, 1, 1)
+        # global average pooling reduces (H, W) -> 1 value per channel
+        self.pool = nn.AdaptiveAvgPool2d(1)
 
-        # first 1x1 convolution: reduces the number of channels to a smaller hidden size
+        # 1x1 conv acts like a tiny fully connected layer over channels
         self.fc1 = nn.Conv2d(channels, hidden, kernel_size=1)
-
-        # second 1x1 convolution: maps the hidden representation back to the original number of channels
         self.fc2 = nn.Conv2d(hidden, channels, kernel_size=1)
 
-    # forward pass
     def forward(self, x):
-        #squeeze spatial information into one value per channel
+        # squeeze spatial dimensions
         scale = self.pool(x)
 
-        # small nonlinear transformation
+        # small nonlinear channel transform
         scale = F.silu(self.fc1(scale))
 
-        # produce channel weights between 0 and 1
+        # convert to channel weights in [0, 1]
         scale = torch.sigmoid(self.fc2(scale))
 
-        # reweight original feature map channel-wise
+        # reweight each channel
         return x * scale
 
-# efficientnet MBConvBlock, expands channels with 1 by 1 convolution and apply depthwise convolution then apply SE attention
-# and projects back to desired output channels, later on it adds aresidual connection
+
+# mobile inverted bottleneck convolution block
 class MBConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, expansion=4, kernel_size=3):
+    def __init__(self, in_channels, out_channels, expansion=4, kernel_size=3, se_reduction=8):
         super().__init__()
 
-        # expanded channel dimension inside the block
-        hidden_dim = in_channels * expansion
-
-        # use residual only when input and output channle match
+        # residual only if channel size stays the same
         self.use_residual = (in_channels == out_channels)
 
-        # 1x1 expansion convolution: increases channel capacity 
-        self.expand = nn.Conv2d(in_channels, hidden_dim, kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(hidden_dim)
+        # whether to expand channels before depthwise conv
+        self.use_expand = expansion > 1
+        hidden_dim = in_channels * expansion if self.use_expand else in_channels
 
-        # depthwise convolution: applies one spatial filter per channel separately
-        # groups = hidden_dim means each channel is convolved independently
+        # optional expansion layer
+        if self.use_expand:
+            self.expand = nn.Conv2d(in_channels, hidden_dim, kernel_size=1, bias=False)
+            self.bn1 = nn.BatchNorm2d(hidden_dim)
+
+        # depthwise convolution: one filter per channel
         self.depthwise = nn.Conv2d(
             hidden_dim,
             hidden_dim,
@@ -142,241 +158,266 @@ class MBConvBlock(nn.Module):
         )
         self.bn2 = nn.BatchNorm2d(hidden_dim)
 
-        # SE attention block
-        self.se = SEBlock(hidden_dim)
+        # channel attention
+        self.se = SEBlock(hidden_dim, reduction=se_reduction)
 
-        # 1x1 projection convolution: compresses channels back down to out_channels.
+        # projection back to desired output channels
         self.project = nn.Conv2d(hidden_dim, out_channels, kernel_size=1, bias=False)
         self.bn3 = nn.BatchNorm2d(out_channels)
 
     def forward(self, x):
-        # expand channels
-        out = self.expand(x)
-        out = F.silu(self.bn1(out))
+        # IMPORTANT: start with x so out is always defined
+        out = x
 
-        # learn spatial patterns channel-by-channel
+        # optional expansion
+        if self.use_expand:
+            out = self.expand(out)
+            out = F.silu(self.bn1(out))
+
+        # depthwise spatial filtering
         out = self.depthwise(out)
         out = F.silu(self.bn2(out))
 
         # channel attention
         out = self.se(out)
 
-        # project back to output channel size
+        # projection to output size
         out = self.project(out)
         out = self.bn3(out)
 
-        # add skip connection
+        # residual if dimensions match
         if self.use_residual:
             out = out + x
 
-        # final nonlinearity
         return F.silu(out)
 
-# CNN autoencoder class
+
+# lightweight residual conv block
+class LightConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+
+        self.use_residual = (in_channels == out_channels)
+
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.bn1   = nn.BatchNorm2d(out_channels)
+
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.bn2   = nn.BatchNorm2d(out_channels)
+
+        # projection skip if channel sizes differ
+        if not self.use_residual:
+            self.skip = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
+        else:
+            self.skip = None
+
+    def forward(self, x):
+        identity = x
+
+        out = self.conv1(x)
+        out = F.silu(self.bn1(out))
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        if self.use_residual:
+            out = out + identity
+        else:
+            out = out + self.skip(identity)
+
+        return F.silu(out)
+
 class CNNAutoencoder(nn.Module):
+    """
+    Main CNN Autoencoder class
+
+    Includes:
+    - architecture
+    - training
+    - validation
+    - checkpoint loading
+    - inference
+    - visual inspection
+    """
     def __init__(
         self,
-        variant="short_gaps",
-        lossfn="masked_l1",
-        shortgap_loss="masked_l1",
-        longgap_loss="masked_multires_l1",
-        lr=1e-3,
-        weight_decay=1e-5,
-        grad_clip=1.0,
-        device=None
+        base_channels=24,
+        shortgap_loss="masked_l1_grad",
+        longgap_loss="masked_multires_l1_grad"
     ):
         super().__init__()
 
-        self.variant = variant
+        # store default loss names for convenience
         self.shortgap_loss = shortgap_loss
         self.longgap_loss = longgap_loss
-        self.lossfn = self.get_loss(lossfn)
 
-        self.lr = lr
-        self.weight_decay = weight_decay
-        self.grad_clip = grad_clip
-        self.device_name = device
+        # channel sizes across network stages
+        c1 = base_channels
+        c2 = base_channels * 2
+        c3 = base_channels * 4
+        c4 = base_channels * 8
 
-        # metwork architecture
-        # stem layer that combines the 2-channel input into an initial feature representation
+        # stem concatenated into 2 channels
         self.stem = nn.Sequential(
-            nn.Conv2d(2, 32, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(2, c1, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(c1),
             nn.SiLU()
         )
 
-        # encoder layer
+        # encoder
+        self.enc1 = LightConvBlock(c1, c1)
+        self.down1 = nn.Conv2d(c1, c2, kernel_size=3, stride=2, padding=1, bias=False)
 
-        # 1st encoder stage, keeps same spatial size, refines features
-        self.enc1 = MBConvBlock(32, 32, expansion=2, kernel_size=3)
+        self.enc2 = MBConvBlock(c2, c2, expansion=2, kernel_size=3, se_reduction=8)
+        self.down2 = nn.Conv2d(c2, c3, kernel_size=3, stride=2, padding=1, bias=False)
 
-        # downsampel 1, halves time and frequency resolution, increases channels
-        self.down1 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1, bias=False)
+        self.enc3 = MBConvBlock(c3, c3, expansion=3, kernel_size=5, se_reduction=8)
+        self.down3 = nn.Conv2d(c3, c4, kernel_size=3, stride=2, padding=1, bias=False)
 
-        # 2nd encoder stage
-        self.enc2 = MBConvBlock(64, 64, expansion=4, kernel_size=3)
-
-        # dwonsample 2
-        self.down2 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1, bias=False)
-
-        # 3rd encoder stage
-        self.enc3 = MBConvBlock(128, 128, expansion=4, kernel_size=5)
-
-        # downsample 3
-        self.down3 = nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1, bias=False)
-
-
-        # bottleneck layer, stores compressed representation of spectrogram
+        # bottleneck
         self.bottleneck = nn.Sequential(
-            MBConvBlock(256, 256, expansion=4, kernel_size=5),
-            MBConvBlock(256, 256, expansion=4, kernel_size=3)
+            MBConvBlock(c4, c4, expansion=3, kernel_size=5, se_reduction=8),
+            MBConvBlock(c4, c4, expansion=3, kernel_size=3, se_reduction=8)
         )
 
         # decoder
-
-        # upsample 1, doubling the spatial size
         self.up1 = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
+        self.dec1 = MBConvBlock(c4, c3, expansion=2, kernel_size=5, se_reduction=8)
 
-        # 1st decoder stage, refines features after upsampling and reduces channel count
-        self.dec1 = MBConvBlock(256, 128, expansion=4, kernel_size=5)
-
-        # upsample 2
         self.up2 = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
+        self.dec2 = MBConvBlock(c3, c2, expansion=2, kernel_size=3, se_reduction=8)
 
-        # 2nd decoder stage 
-        self.dec2 = MBConvBlock(128, 64, expansion=4, kernel_size=3)
-
-        # upsample 3
         self.up3 = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
+        self.dec3 = LightConvBlock(c2, c1)
 
-        # 3rd decoder stage
-        self.dec3 = MBConvBlock(64, 32, expansion=2, kernel_size=3)
-
-        # final output layer
-        self.final_conv = nn.Conv2d(32, 1, kernel_size=1)
+        # final single-channel reconstruction
+        self.final_conv = nn.Conv2d(c1, 1, kernel_size=1)
 
     # forward pass
-    def forward(self, x, mask):
-        # concatenate masked spectrogram and mask along channel dimension
+    def forward(self, x, mask, return_intermediates=False):
+        # concatenate masked spectrogram and binary mask
         inp = torch.cat([x, mask], dim=1)
 
-        # initial feature extraction
-        h = self.stem(inp)
+        # stem
+        h0 = self.stem(inp)
 
         # encoder
-        h = self.enc1(h)
-        h = F.silu(self.down1(h))
+        h1 = self.enc1(h0)
+        h1d = F.silu(self.down1(h1))
 
-        h = self.enc2(h)
-        h = F.silu(self.down2(h))
+        h2 = self.enc2(h1d)
+        h2d = F.silu(self.down2(h2))
 
-        h = self.enc3(h)
-        h = F.silu(self.down3(h))
+        h3 = self.enc3(h2d)
+        h3d = F.silu(self.down3(h3))
 
         # bottleneck
-        h = self.bottleneck(h)
+        hb = self.bottleneck(h3d)
 
         # decoder
-        h = self.up1(h)
-        h = self.dec1(h)
+        u1 = self.up1(hb)
+        d1 = self.dec1(u1)
 
-        h = self.up2(h)
-        h = self.dec2(h)
+        u2 = self.up2(d1)
+        d2 = self.dec2(u2)
 
-        h = self.up3(h)
-        h = self.dec3(h)
+        u3 = self.up3(d2)
+        d3 = self.dec3(u3)
 
-        # map features back to a single reconstructed spectrogram channel
-        out = self.final_conv(h)
+        # map back to 1-channel spectrogram
+        out = self.final_conv(d3)
 
-        # safety step:
-        # resize back if the output spatial size differs from the input
+        # safety resize if spatial dimensions mismatch
         if out.shape[-2:] != x.shape[-2:]:
             out = F.interpolate(out, size=x.shape[-2:], mode="bilinear", align_corners=False)
 
+        if return_intermediates:
+            return {
+                "stem": h0,
+                "enc1": h1,
+                "enc2": h2,
+                "enc3": h3,
+                "bottleneck": hb,
+                "dec1": d1,
+                "dec2": d2,
+                "dec3": d3,
+                "out": out,
+            }
 
         return out
 
-    # configuration helpers
-    def get_loss(self, lossfn):            
-        if self.variant == "short_gap":
-            return self.shortgap_loss
-        elif self.variant == "long_gap":
-            return self.longgap_loss
+    # loss selection helper
+    def get_loss_name(self, variant="short_gap", shortgap_loss=None, longgap_loss=None):
+        # allow override during call, otherwise use defaults stored in the model
+        shortgap_loss = shortgap_loss or self.shortgap_loss
+        longgap_loss = longgap_loss or self.longgap_loss
+
+        if variant == "short_gap":
+            return shortgap_loss
+        elif variant == "long_gap":
+            return longgap_loss
         else:
-            raise ValueError(
-                f"Invalid gap variant {self.variant}."
-            )
+            raise ValueError(f"Invalid gap variant: {variant}")
 
-    def config_optimiser(self):
-        self.optimiser = Adam(
-            self.parameters(),
-            lr=self.lr,
-            weight_decay=self.weight_decay,
-        )
-        return self.optimiser
-
-    def get_device(self):
-        if self.device_name is not None:
-            return torch.device(self.device_name)
-        return next(self.parameters()).device
-
-    # loss + metrics
-    def compute_loss(self, pred, target, mask, lossfn=None):
-        # masked l1
-        if lossfn == "masked_l1":
+    # compute training loss
+    def compute_loss(self, pred, target, mask, loss_name="masked_l1_grad"):
+        if loss_name == "masked_l1":
             total_loss, gap_loss, context_loss = masked_l1_loss(pred, target, mask)
-            loss_dict = {
-                "loss": total_loss.item(),
-                "gap_loss": gap_loss.item(),
-                "context_loss": context_loss.item(),
+            log_dict = {
+                "loss": float(total_loss.item()),
+                "gap_loss": float(gap_loss.item()),
+                "context_loss": float(context_loss.item()),
+                "grad_loss": 0.0,
             }
-        # masked l1 gradient
-        elif lossfn == "masked_l1_grad":
+
+        elif loss_name == "masked_l1_grad":
             total_loss, gap_loss, context_loss, grad_loss = masked_l1_grad_loss(pred, target, mask)
-            loss_dict = {
-                "loss": total_loss.item(),
-                "gap_loss": gap_loss.item(),
-                "context_loss": context_loss.item(),
-                "grad_loss": grad_loss.item(),
+            log_dict = {
+                "loss": float(total_loss.item()),
+                "gap_loss": float(gap_loss.item()),
+                "context_loss": float(context_loss.item()),
+                "grad_loss": float(grad_loss.item()),
             }
 
-        # masked huber
-        elif lossfn == "masked_huber":
+        elif loss_name == "masked_huber":
             total_loss, gap_loss, context_loss = masked_huber_loss(pred, target, mask)
-            loss_dict = {
-                "loss": total_loss.item(),
-                "gap_loss": gap_loss.item(),
-                "context_loss": context_loss.item(),
+            log_dict = {
+                "loss": float(total_loss.item()),
+                "gap_loss": float(gap_loss.item()),
+                "context_loss": float(context_loss.item()),
+                "grad_loss": 0.0,
             }
 
-        # maskd multiresolution l1
-        elif lossfn == "masked_multires_l1":
+        elif loss_name == "masked_multires_l1":
             total_loss, gap_loss, context_loss = masked_multires_l1_loss(pred, target, mask)
-            loss_dict = {
-                "loss": total_loss.item(),
-                "gap_loss": gap_loss.item(),
-                "context_loss": context_loss.item(),
+            log_dict = {
+                "loss": float(total_loss.item()),
+                "gap_loss": float(gap_loss.item()),
+                "context_loss": float(context_loss.item()),
+                "grad_loss": 0.0,
             }
 
         else:
-            raise ValueError(f"Unknown loss_name: {lossfn}")
+            raise ValueError(f"Unknown loss_name: {loss_name}")
 
-        return total_loss, loss_dict
+        return total_loss, log_dict
 
     # compute evaluation metrics
     def compute_metrics(self, pred, target, mask):
         return {
-            "gap_mae": masked_mae(pred, target, mask).item(),
-            "gap_rmse": masked_rmse(pred, target, mask).item(),
-            "full_mae": full_mae(pred, target).item(),
-            "full_rmse": full_rmse(pred, target).item(),
-            "psnr": psnr(pred, target).item(),
+            "gap_mae": float(masked_mae(pred, target, mask).item()),
+            "gap_rmse": float(masked_rmse(pred, target, mask).item()),
+            "full_mae": float(full_mae(pred, target).item()),
+            "full_rmse": float(full_rmse(pred, target).item()),
+            "psnr": float(psnr(pred, target).item()),
         }
-    
-    # empty running dict for model training and logging
-    def empty_dict(self):
-        return {
+
+    # train for one epoch
+    def train_epoch(self, dataloader, optimiser, device, loss_name, grad_clip=1.0, use_amp=True):
+        # standard PyTorch train mode
+        super().train()
+
+        running = {
             "loss": 0.0,
             "gap_loss": 0.0,
             "context_loss": 0.0,
@@ -388,111 +429,110 @@ class CNNAutoencoder(nn.Module):
             "psnr": 0.0,
         }
 
-    # train model for one full epoch
-    def train_epoch(self, dataloader, optimiser=None, device=None, lossfn=None, grad_clip=None):
-        self.train()
-
-        # optmimiser
-        optimiser = optimiser or self.optimiser
-        if optimiser is None:
-            raise ValueError("Optimiser is not set. Call configure_optimiser() first.")
-
-        # device
-        device = device or self.get_device()
-        grad_clip = self.grad_clip if grad_clip is None else grad_clip
-
-        running = self.empty_dict()
         num_batches = 0
 
-        # loop through all batches in the training set
-        for batch in dataloader:
-            # move input tensors to device
-            x = batch["x"].to(device)       # masked spectrogram
-            y = batch["y"].to(device)       # clean target spectrogram
-            mask = batch["mask"].to(device) # binary gap mask
+        # AMP only on CUDA
+        use_amp = use_amp and ("cuda" in str(device))
+        scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
-            # reset old gradients before computing new ones
-            optimiser.zero_grad()
+        for batch in tqdm(dataloader, leave=False):
+            x = batch["x"].to(device, non_blocking=True)
+            y = batch["y"].to(device, non_blocking=True)
+            mask = batch["mask"].to(device, non_blocking=True)
 
-            # forward pass - predict reocnstructed spectrogram
-            pred = self(x, mask)
+            optimiser.zero_grad(set_to_none=True)
 
-            # compute chosen loss 
-            total_loss, loss_dict = self.compute_loss(pred, y, mask, lossfn=lossfn)
+            with torch.amp.autocast("cuda", enabled=use_amp):
+                pred = self(x, mask)
+                total_loss, loss_dict = self.compute_loss(pred, y, mask, loss_name=loss_name)
 
-            total_loss.backward() # backward pass compute gradients
+            scaler.scale(total_loss).backward()
 
-            # gradient clipping
             if grad_clip is not None:
+                scaler.unscale_(optimiser)
                 torch.nn.utils.clip_grad_norm_(self.parameters(), grad_clip)
 
-            optimiser.step() # update model parameters
+            scaler.step(optimiser)
+            scaler.update()
 
-            # compute evaluation metrics for this batch
-            eval_dict = self.compute_metrics(pred, y, mask)
+            with torch.no_grad():
+                eval_dict = self.compute_metrics(pred.float(), y.float(), mask.float())
 
-            # accumulate loss metrics
-            for key in loss_dict:
-                if key in running:
-                    running[key] += loss_dict[key]
-
-            # accumulate eval metrics
-            for key in eval_dict:
-                running[key] += eval_dict[key]
-
-            num_batches += 1
-
-        # average all metrics across batches
-        return {k: v / max(num_batches, 1) for k, v in running.items()}
-
-    # evaluate model for one full epoch
-    @torch.no_grad()
-    def eval_epoch(self, dataloader, device=None, lossfn=None):
-        # set model to eval mode
-        self.eval()
-
-        device = device or self.get_device()
-        running = self._empty_running_dict()
-        num_batches = 0
-
-        # loop over validation data
-        for batch in dataloader:
-            x = batch["x"].to(device)
-            y = batch["y"].to(device)
-            mask = batch["mask"].to(device)
-
-            # forward pass 
-            pred = self(x, mask)
-
-            # compute training loss values for logging
-            _, loss_dict = self.compute_loss(pred, y, mask, lossfn=lossfn)
-            eval_dict = self.compute_metrics(pred, y, mask) # compute eval metrics
-
-            # accumualte metrics
             for key, value in loss_dict.items():
-                if key in running:
-                    running[key] += value
+                running[key] += value
 
             for key, value in eval_dict.items():
-                if key in running:
-                    running[key] += value
+                running[key] += value
 
             num_batches += 1
-        
-        # avergae all metrics across batches
+
+        return {k: v / max(num_batches, 1) for k, v in running.items()}
+
+    # evaluate for one epoch
+    @torch.no_grad()
+    def eval_epoch(self, dataloader, device, loss_name, use_amp=True):
+        # standard PyTorch eval mode
+        super().eval()
+
+        running = {
+            "loss": 0.0,
+            "gap_loss": 0.0,
+            "context_loss": 0.0,
+            "grad_loss": 0.0,
+            "gap_mae": 0.0,
+            "gap_rmse": 0.0,
+            "full_mae": 0.0,
+            "full_rmse": 0.0,
+            "psnr": 0.0,
+        }
+
+        num_batches = 0
+        use_amp = use_amp and ("cuda" in str(device))
+
+        for batch in tqdm(dataloader, desc="Val", leave=False):
+            x = batch["x"].to(device, non_blocking=True)
+            y = batch["y"].to(device, non_blocking=True)
+            mask = batch["mask"].to(device, non_blocking=True)
+
+            with torch.amp.autocast("cuda", enabled=use_amp):
+                pred = self(x, mask)
+                total_loss, loss_dict = self.compute_loss(pred, y, mask, loss_name=loss_name)
+
+            eval_dict = self.compute_metrics(pred.float(), y.float(), mask.float())
+
+            for key, value in loss_dict.items():
+                running[key] += value
+
+            for key, value in eval_dict.items():
+                running[key] += value
+
+            num_batches += 1
+
         return {k: v / max(num_batches, 1) for k, v in running.items()}
 
     # full training loop
-    def fit(self, train_loader, val_loader, n_epochs, checkpoint_dir, history_csv_path,
-             optimiser=None, lossfn=None, monitor="val_gap_rmse", mode="min", patience=5,
-             min_delta=1e-4, save_best_after_epoch=10, grad_clip=None, device=None):
-        
-        device = device or self.get_device()
-        optimiser = optimiser or self.optimiser
-        if optimiser is None:
-            optimiser = self.configure_optimiser()
-        
-        # history dictionary storing one list per metric
+    def fit(
+        self,
+        train_loader,
+        val_loader,
+        optimiser,
+        device,
+        n_epochs,
+        checkpoint_dir,
+        history_csv_path,
+        loss_name=None,
+        monitor="val_gap_rmse",
+        mode="min",
+        patience=5,
+        min_delta=1e-4,
+        save_best_after_epoch=5,
+        grad_clip=1.0,
+        use_amp=True,
+    ):
+        # create checkpoint directory if needed
+        checkpoint_dir = Path(checkpoint_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
         history = {
             "epoch": [],
             "train_loss": [],
@@ -515,7 +555,11 @@ class CNNAutoencoder(nn.Module):
             "val_psnr": [],
         }
 
-        # manager handles best model, last model and early stopping
+        # resolve loss name if user did not pass one
+        if loss_name is None:
+            loss_name = self.shortgap_loss
+
+        # your external checkpoint manager
         manager = ModelCheckpoint(
             checkpoint_dir=checkpoint_dir,
             monitor=monitor,
@@ -525,23 +569,24 @@ class CNNAutoencoder(nn.Module):
             save_best_after_epoch=save_best_after_epoch,
             verbose=True,
         )
-        # main trianingn loop
+
         for epoch in tqdm(range(1, n_epochs + 1), desc="Training"):
-            # train for one epoch
             train_metrics = self.train_epoch(
                 dataloader=train_loader,
                 optimiser=optimiser,
                 device=device,
-                lossfn=lossfn,
+                loss_name=loss_name,
                 grad_clip=grad_clip,
+                use_amp=use_amp,
             )
-            # validate for one epoch
+
             val_metrics = self.eval_epoch(
                 dataloader=val_loader,
                 device=device,
-                lossfn=lossfn,
+                loss_name=loss_name,
+                use_amp=use_amp,
             )
-            # compute train and validation metrics into one record
+
             epoch_record = {
                 "epoch": epoch,
                 "train_loss": train_metrics["loss"],
@@ -564,7 +609,6 @@ class CNNAutoencoder(nn.Module):
                 "val_psnr": val_metrics["psnr"],
             }
 
-            # append values into history lists
             for key in history:
                 history[key].append(epoch_record[key])
 
@@ -577,20 +621,18 @@ class CNNAutoencoder(nn.Module):
             print(f"Val PSNR:       {val_metrics['psnr']:.4f}")
             print("-" * 60)
 
-            # checkpoint + early stopping step
             manager.step(
                 epoch=epoch,
                 metrics=epoch_record,
                 model=self,
                 optimiser=optimiser,
             )
-            
-            # stop training if patience is exhausted
+
             if manager.should_stop:
                 print(f"Early stopping triggered at epoch {epoch}")
                 break
 
-        # save full training history to csv
+        # save history csv with your own utility
         save_history(history, history_csv_path)
 
         return {
@@ -598,40 +640,156 @@ class CNNAutoencoder(nn.Module):
             "best_score": manager.best_score,
             "best_epoch": manager.best_epoch,
             "checkpoint_dir": checkpoint_dir,
+            "loss_name": loss_name,
         }
 
-    # inferencing helpers
-    @torch.no_grad()
-    # inferencing step
-    def inference(self, x, mask, device=None):
-        # set to eval mode
-        self.eval()
-        device = device or self.get_device()
+    # load checkpoint from a path
+    def load_checkpoint(self, checkpoint_path, device):
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        self.load_state_dict(checkpoint["model_state_dict"])
+        print("Loaded model from epoch:", checkpoint.get("epoch", "unknown"))
+        print("Best monitored score:", checkpoint.get("best_score", "unknown"))
+        return checkpoint
 
-        # if single sample has no batch dimension, add one
+    # convenience method for loading best_model.pt
+    def load_best(self, checkpoint_dir, device):
+        checkpoint_dir = Path(checkpoint_dir)
+        best_model_path = checkpoint_dir / "best_model.pt"
+        return self.load_checkpoint(best_model_path, device)
+
+    # predict raw reconstruction
+    @torch.no_grad()
+    def predict(self, x, mask, device):
+        super().eval()
+
+        # if single sample is (C, H, W), add batch dimension
         if x.dim() == 3:
             x = x.unsqueeze(0)
         if mask.dim() == 3:
             mask = mask.unsqueeze(0)
-        
-        # move to device
+
         x = x.to(device)
         mask = mask.to(device)
 
-        # forward pass
         pred = self(x, mask)
         return pred
 
+    # merge model prediction into masked region only
+    # keep known context unchanged
+    @staticmethod
+    def reconstruct(masked_input, pred, mask):
+        return masked_input * (1.0 - mask) + pred * mask
+
+    # predict and directly return merged final spectrogram
     @torch.no_grad()
-    # mix prediction with context
-    def reconstruct_full(self, x, mask, device=None):
-        pred = self.inference(x, mask, device=device)
-        x_device = x.to(pred.device)
-        mask_device = mask.to(pred.device)
+    def predict_full(self, x, mask, device):
+        pred = self.predict(x, mask, device)
+        x = x.to(device)
+        mask = mask.to(device)
 
-        if x_device.dim() == 3:
-            x_device = x_device.unsqueeze(0)
-        if mask_device.dim() == 3:
-            mask_device = mask_device.unsqueeze(0)
+        if x.dim() == 3:
+            x = x.unsqueeze(0)
+        if mask.dim() == 3:
+            mask = mask.unsqueeze(0)
 
-        return x_device * (1.0 - mask_device) + pred * mask_device
+        merged = self.reconstruct(x, pred, mask)
+        return pred, merged
+
+    # visual inspection of results on a dataloader batch
+    @torch.no_grad()
+    def inspect_results(self, dataloader, device, n_examples=2, show_mask=True):
+        super().eval()
+
+        batch = next(iter(dataloader))
+
+        x = batch["x"][:n_examples].to(device)
+        y = batch["y"][:n_examples].to(device)
+        m = batch["mask"][:n_examples].to(device)
+
+        pred = self(x, m)
+        merged = self.reconstruct(x, pred, m)
+
+        x_np = x.cpu().numpy()
+        y_np = y.cpu().numpy()
+        pred_np = pred.cpu().numpy()
+        merged_np = merged.cpu().numpy()
+        mask_np = m.cpu().numpy()
+
+        n_cols = 5 if show_mask else 4
+        plt.figure(figsize=(4.5 * n_cols, 4 * n_examples))
+
+        for i in range(min(n_examples, x_np.shape[0])):
+            col = 1
+
+            plt.subplot(n_examples, n_cols, n_cols * i + col)
+            plt.imshow(x_np[i, 0], aspect="auto", origin="lower")
+            plt.title(f"Masked input {i}")
+            plt.colorbar()
+            col += 1
+
+            plt.subplot(n_examples, n_cols, n_cols * i + col)
+            plt.imshow(y_np[i, 0], aspect="auto", origin="lower")
+            plt.title(f"Ground truth {i}")
+            plt.colorbar()
+            col += 1
+
+            plt.subplot(n_examples, n_cols, n_cols * i + col)
+            plt.imshow(pred_np[i, 0], aspect="auto", origin="lower")
+            plt.title(f"Raw recon {i}")
+            plt.colorbar()
+            col += 1
+
+            plt.subplot(n_examples, n_cols, n_cols * i + col)
+            plt.imshow(merged_np[i, 0], aspect="auto", origin="lower")
+            plt.title(f"Final recon {i}")
+            plt.colorbar()
+            col += 1
+
+            if show_mask:
+                plt.subplot(n_examples, n_cols, n_cols * i + col)
+                plt.imshow(mask_np[i, 0], aspect="auto", origin="lower")
+                plt.title(f"Mask {i}")
+                plt.colorbar()
+
+        plt.tight_layout()
+        plt.show()
+
+    # visual inspection of intermediate feature maps
+    @torch.no_grad()
+    def inspect_stages(self, dataloader, device, n_examples=1):
+        super().eval()
+
+        batch = next(iter(dataloader))
+
+        x = batch["x"][:n_examples].to(device)
+        y = batch["y"][:n_examples].to(device)
+        m = batch["mask"][:n_examples].to(device)
+
+        stage_dict = self(x, m, return_intermediates=True)
+        stage_names = ["stem", "enc1", "enc2", "enc3", "bottleneck", "dec1", "dec2", "dec3", "out"]
+
+        x_np = x.cpu().numpy()
+        y_np = y.cpu().numpy()
+
+        plt.figure(figsize=(4 * (2 + len(stage_names)), 4 * n_examples))
+
+        for i in range(n_examples):
+            plt.subplot(n_examples, 2 + len(stage_names), i * (2 + len(stage_names)) + 1)
+            plt.imshow(x_np[i, 0], aspect="auto", origin="lower")
+            plt.title("Masked input")
+            plt.colorbar()
+
+            plt.subplot(n_examples, 2 + len(stage_names), i * (2 + len(stage_names)) + 2)
+            plt.imshow(y_np[i, 0], aspect="auto", origin="lower")
+            plt.title("Ground truth")
+            plt.colorbar()
+
+            for j, name in enumerate(stage_names):
+                feat = stage_dict[name][i, 0].detach().cpu().numpy()
+                plt.subplot(n_examples, 2 + len(stage_names), i * (2 + len(stage_names)) + 3 + j)
+                plt.imshow(feat, aspect="auto", origin="lower")
+                plt.title(name)
+                plt.colorbar()
+
+        plt.tight_layout()
+        plt.show()
