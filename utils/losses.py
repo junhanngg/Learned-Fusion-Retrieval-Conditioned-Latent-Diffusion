@@ -6,7 +6,7 @@ import torch.nn.functional as F
 def safe_mean(value, mask, eps=1e-8):
     return (value * mask).sum() / (mask.sum() + eps)
 
-# split binary mask into gap mask and contex mask 
+# split binary mask into gap mask and contex mask
 def split_gap_context(mask):
     """
     Assumes: mask == 1 in missing and mask == 0 in known
@@ -26,7 +26,7 @@ def masked_l1_loss(pred, target, mask, context_weight=0.1, eps=1e-8):
     # split mask into missing region and known region
     gap_mask, context_mask = split_gap_context(mask)
     abs_error = (pred - target).abs() # per pixel abs error
-    
+
     # avg error in missing region
     gap_loss = safe_mean(abs_error, gap_mask, eps)
 
@@ -85,7 +85,7 @@ def gradient_consistency_loss(pred, target, reduction="mean"):
 
 # masked L1 + gradient consistency loss
 def masked_l1_grad_loss(pred, target, mask, context_weight=0.1, grad_weight=0.1, eps=1e-8):
-    
+
     # base reconstruction term
     recon_loss, gap_loss, context_loss = masked_l1_loss(
         pred, target, mask, context_weight=context_weight, eps=eps
@@ -149,10 +149,10 @@ def masked_multires_l1_loss(pred, target, mask, context_weight=0.1, scales=(1, 2
             target_s = F.avg_pool2d(target, kernel_size=s, stride=s)
             mask_s = F.avg_pool2d(mask, kernel_size=s, stride=s)
 
-            # convert pooled mask back to binary 
+            # convert pooled mask back to binary
             mask_s = (mask_s > 0).float()
 
-        # compute masked l1 
+        # compute masked l1
         loss_s, gap_s, context_s = masked_l1_loss(
             pred_s, target_s, mask_s, context_weight=context_weight, eps=eps
         )
@@ -227,12 +227,65 @@ def latent_l1_loss(pred_latent, target_latent):
 def latent_l2_loss(pred_latent, target_latent):
     return F.mse_loss(pred_latent, target_latent)
 
+##############################################################################################
+# Masked losses for Diffusion Model
+##############################################################################################
+
+# masked weighted MSE noise loss
+def masked_diffusion_noise_mse_loss(pred_noise, true_noise, mask_latent, masked_weight=3.0, eps=1e-8):
+    """
+    diffusion noise mse treated every latent position equally, but for inpainting the masked region 
+    is harder portion of learning, so we upweight the masked region
+
+    mask_latent: 1 in missing region, 0 in known region
+
+    masked_weight: weight to care more about missing region than known region
+    """
+    se = (pred_noise - true_noise) ** 2
+
+    # known region weight = 1
+    # missing region weight = masked_weight
+    weight = 1.0 + (masked_weight - 1.0) * mask_latent
+
+    # multiply squared error by weights, then average
+    loss = (se * weight).sum() / (weight.sum() * pred_noise.shape[1] + eps)
+    return loss
+
+# return on mse value per batch item
+def per_sample_mse_loss(pred, target):
+    return ((pred - target) ** 2).mean(dim=(1, 2, 3))
+
+# return one mask-weight MSE value per batc item
+def per_sample_masked_mse_loss(pred, target, mask_latent, masked_weight=3.0, eps=1e-8):
+    se = (pred - target) ** 2
+    weight = 1.0 + (masked_weight - 1.0) * mask_latent
+
+    numer = (se * weight).sum(dim=(1, 2, 3))
+    denom = (weight.sum(dim=(1, 2, 3)) * pred.shape[1]) + eps
+    return numer / denom
+
+# compute signal-to-noise ratio for each timestep
+def compute_snr(schedule, t, eps=1e-8):
+  alpha_bar_t = schedule.alpha_bars.gather(0, t)
+  snr = alpha_bar_t / (1.0 - alpha_bar_t + eps)
+  return snr
+
+# min-snr weighting
+def min_snr(schedule, t, gamma=5.0, eps=1e-8):
+  """
+  high snr timesteps can dominate training, hence we clamping them using gamma 
+  weight = min(snr, gamma)/snr
+  """
+  snr = compute_snr(schedule, t, eps=eps)
+  clipped = torch.clamp(snr, max=gamma)
+  weight = clipped / (snr + eps)
+  return weight  # [B]
 
 ##############################################################################################
 # Metric helpers for evaluation
 ##############################################################################################
 
-# mean absolute error inside missing gap 
+# mean absolute error inside missing gap
 def masked_mae(pred, target, mask, eps=1e-8):
     gap_mask, _ = split_gap_context(mask)
     abs_error = (pred - target).abs()
