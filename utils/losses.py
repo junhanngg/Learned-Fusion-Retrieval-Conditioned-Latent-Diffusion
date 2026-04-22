@@ -227,6 +227,33 @@ def latent_l1_loss(pred_latent, target_latent):
 def latent_l2_loss(pred_latent, target_latent):
     return F.mse_loss(pred_latent, target_latent)
 
+# masked latent l1 loss
+def masked_latent_l1_loss(pred_latent, target_latent, mask_latent, context_weight=0.1, eps=1e-8):
+    abs_err = (pred_latent - target_latent).abs()
+
+    gap_mask = mask_latent.expand_as(abs_err)
+    context_mask = (1.0 - mask_latent).expand_as(abs_err)
+
+    gap_loss = (abs_err * gap_mask).sum() / (gap_mask.sum() + eps)
+    context_loss = (abs_err * context_mask).sum() / (context_mask.sum() + eps)
+
+    total_loss = gap_loss + context_weight * context_loss
+    return total_loss, gap_loss, context_loss
+
+# masked latent l2 loss
+def masked_latent_l2_loss(pred_latent, target_latent, mask_latent, context_weight=0.1, eps=1e-8):
+    sq_err = (pred_latent - target_latent) ** 2
+
+    gap_mask = mask_latent.expand_as(sq_err)
+    context_mask = (1.0 - mask_latent).expand_as(sq_err)
+
+    gap_loss = (sq_err * gap_mask).sum() / (gap_mask.sum() + eps)
+    context_loss = (sq_err * context_mask).sum() / (context_mask.sum() + eps)
+
+    total_loss = gap_loss + context_weight * context_loss
+    return total_loss, gap_loss, context_loss
+
+
 ##############################################################################################
 # Masked losses for Diffusion Model
 ##############################################################################################
