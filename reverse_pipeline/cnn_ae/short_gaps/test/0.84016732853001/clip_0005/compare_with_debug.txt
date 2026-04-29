@@ -1,0 +1,11 @@
+HF debug prefix:
+debug/short_gaps/test/0.84016732853001/clip_0005
+
+Compare against debug clean_full.wav:
+https://huggingface.co/datasets/han2o/grant-ortsaem-processedV3/resolve/main/debug/short_gaps/test/0.84016732853001/clip_0005/clean_full.wav
+
+Saved files:
+ground_truth_full_hf: ground_truth_full_hf.wav
+clean_fullmel_griffin_lim: clean_fullmel_griffin_lim.wav
+ground_truth_gap_hf: ground_truth_gap_hf.wav
+predicted_gap_griffin_lim: predicted_gap_griffin_lim.wav
