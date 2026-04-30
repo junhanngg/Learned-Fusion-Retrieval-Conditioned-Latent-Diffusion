@@ -5,7 +5,7 @@ Compare against debug clean_full.wav:
 https://huggingface.co/datasets/han2o/grant-ortsaem-processedV3/resolve/main/debug/short_gaps/test/1.373930780066924/clip_0008/clean_full.wav
 
 Saved files:
-ground_truth_full_hf: ground_truth_full_hf.wav
-clean_fullmel_griffin_lim: clean_fullmel_griffin_lim.wav
-ground_truth_gap_hf: ground_truth_gap_hf.wav
+gap_clean_griffin_lim: gap_clean_griffin_lim.wav
 predicted_gap_griffin_lim: predicted_gap_griffin_lim.wav
+clean_fullmel_griffin_lim: clean_fullmel_griffin_lim.wav
+full_merged_griffin_lim: full_merged_griffin_lim.wav
