@@ -335,13 +335,13 @@ Its training objective combines:
 
 The total objective can be written as:
 
-\[
-\mathcal{L}
+$$
+L
 =
-\mathcal{L}_{\text{recon}}
+L_{recon}
 +
-\beta \mathcal{L}_{KL}
-\]
+\beta \L_KL}
+$$
 
 with a KL warm-up schedule.
 
@@ -367,14 +367,14 @@ current noisy latent
 or:
 
 $$
-x_{\text{in}}
+x_{in}
 =
-\operatorname{Concat}
+\text{Concat}
 \left(
 z_t,\,
-z_{\text{masked}},\,
-z_{0,\text{selfcond}},\,
-m_{\text{latent}}
+z_{masked},\,
+z_{0, selfcond},\,
+m_{latent}
 \right)
 $$
 
