@@ -336,11 +336,11 @@ Its training objective combines:
 The total objective can be written as:
 
 $$
-L
+\mathcal{L}
 =
-L_{recon}
+\mathcal{L}_{\text{recon}}
 +
-\beta \L_KL}
+\beta \mathcal{L}_{\text{KL}}
 $$
 
 with a KL warm-up schedule.
@@ -363,20 +363,6 @@ current noisy latent
 + self-conditioning latent
 + latent-space mask
 ```
-
-or:
-
-$$
-x_{in}
-=
-\text{Concat}
-\left(
-z_t,\,
-z_{masked},\,
-z_{0, selfcond},\,
-m_{latent}
-\right)
-$$
 
 The diffusion U-Net includes:
 
