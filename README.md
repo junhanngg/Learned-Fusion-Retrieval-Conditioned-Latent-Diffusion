@@ -366,11 +366,11 @@ current noisy latent
 
 or:
 
-\[
+$$
 x_{\text{in}}
 =
 [z_t \| z_{\text{masked}} \| z_{0,\text{selfcond}} \| m_{\text{latent}}]
-\]
+$$
 
 The diffusion U-Net includes:
 
