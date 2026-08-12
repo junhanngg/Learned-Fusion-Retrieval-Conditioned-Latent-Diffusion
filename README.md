@@ -369,7 +369,13 @@ or:
 $$
 x_{\text{in}}
 =
-[z_t \| z_{\text{masked}} \| z_{0,\text{selfcond}} \| m_{\text{latent}}]
+\operatorname{Concat}
+\left(
+z_t,\,
+z_{\text{masked}},\,
+z_{0,\text{selfcond}},\,
+m_{\text{latent}}
+\right)
 $$
 
 The diffusion U-Net includes:
